@@ -1,0 +1,23 @@
+const $=s=>document.querySelector(s), board=$('#board'), layer=$('#photos');
+let photos=[],selected=null,db; const SETTINGS='photopan-settings-v1';
+const controls=['bg','texture','title','copy','font','align','fontSize','letter','line','textColor','textOpacity'];
+function openDB(){return new Promise((ok,no)=>{const r=indexedDB.open('PhotoPanDB',1);r.onupgradeneeded=()=>r.result.createObjectStore('photos',{keyPath:'id'});r.onsuccess=()=>{db=r.result;ok()};r.onerror=no})}
+function tx(mode='readonly'){return db.transaction('photos',mode).objectStore('photos')}
+function dbPut(p){tx('readwrite').put(p)} function dbDel(id){tx('readwrite').delete(id)} function dbClear(){tx('readwrite').clear()}
+function dbAll(){return new Promise(ok=>{const r=tx().getAll();r.onsuccess=()=>ok(r.result||[])})}
+function saveSettings(){let s={};controls.forEach(id=>s[id]=$('#'+id).value);localStorage.setItem(SETTINGS,JSON.stringify(s));applyText()}
+function restoreSettings(){try{let s=JSON.parse(localStorage.getItem(SETTINGS));if(s)controls.forEach(id=>{if(s[id]!=null)$('#'+id).value=s[id]})}catch{} applyText()}
+function applyText(){board.style.background=$('#bg').value;board.className='board '+$('#texture').value;$('#titleOut').textContent=$('#title').value;$('#copyOut').textContent=$('#copy').value;let f=$('#boardFooter');f.style.fontFamily=$('#font').value;f.style.textAlign=$('#align').value;f.style.fontSize=$('#fontSize').value+'px';f.style.letterSpacing=$('#letter').value+'px';f.style.lineHeight=$('#line').value;f.style.color=$('#textColor').value;f.style.opacity=$('#textOpacity').value}
+function rand(a,b){return a+Math.random()*(b-a)}
+function layoutData(i,n){let cols=n<5?2:n<10?3:4, col=i%cols,row=Math.floor(i/cols),rows=Math.ceil(n/cols),cw=82/cols,rh=74/rows;return{x:7+col*cw+rand(-3,3),y:5+row*rh+rand(-2.5,2.5),w:cw*rand(.72,1.03),h:rh*rand(.63,.95),r:rand(-7,7),s:100,z:i}}
+function render(){layer.innerHTML='';photos.forEach((p,i)=>{let el=document.createElement('div');el.className='photo motion-'+(p.motion||'none')+(p.id===selected?' selected':'');el.dataset.id=p.id;el.style.cssText=`left:${p.x}%;top:${p.y}%;width:${p.w}%;height:${p.h}%;z-index:${p.z};transform:rotate(${p.r}deg) scale(${p.s/100})`;let im=new Image;im.src=p.data;el.append(im);el.onclick=e=>{e.stopPropagation();select(p.id)};drag(el,p);layer.append(el)})}
+function select(id){selected=id;let p=photos.find(x=>x.id===id);if(!p)return;$('#rotate').value=p.r;$('#scale').value=p.s;$('#motion').value=p.motion||'none';$('#hint').textContent='선택됨 · 드래그해서 위치 이동';render()}
+function drag(el,p){let sx,sy,ox,oy,moved=false;el.onpointerdown=e=>{select(p.id);sx=e.clientX;sy=e.clientY;ox=p.x;oy=p.y;moved=false;el.setPointerCapture(e.pointerId)};el.onpointermove=e=>{if(sx==null)return;moved=true;let r=layer.getBoundingClientRect();p.x=Math.max(-5,Math.min(95,ox+(e.clientX-sx)/r.width*100));p.y=Math.max(-5,Math.min(95,oy+(e.clientY-sy)/r.height*100));el.style.left=p.x+'%';el.style.top=p.y+'%'};el.onpointerup=()=>{sx=null;if(moved)dbPut(p)}}
+async function addFiles(files){for(let file of files){let data=await new Promise(ok=>{let r=new FileReader;r.onload=()=>ok(r.result);r.readAsDataURL(file)});let d=layoutData(photos.length,photos.length+1),p={id:crypto.randomUUID(),data,motion:'tremble',...d};photos.push(p);dbPut(p)}shuffle(false)}
+function shuffle(persist=true){photos.forEach((p,i)=>Object.assign(p,layoutData(i,photos.length),{motion:p.motion||'tremble'}));render();if(persist)photos.forEach(dbPut)}
+$('#picker').onchange=e=>{addFiles([...e.target.files]);e.target.value=''};$('#shuffle').onclick=()=>shuffle();$('#clear').onclick=()=>{if(confirm('사진을 모두 삭제할까요?')){photos=[];selected=null;dbClear();render()}};
+$('#remove').onclick=()=>{if(!selected)return;photos=photos.filter(p=>p.id!==selected);dbDel(selected);selected=null;render()};
+['rotate','scale','motion'].forEach(id=>$('#'+id).oninput=e=>{let p=photos.find(x=>x.id===selected);if(!p)return;if(id==='rotate')p.r=+e.target.value;if(id==='scale')p.s=+e.target.value;if(id==='motion')p.motion=e.target.value;dbPut(p);render()});
+controls.forEach(id=>$('#'+id).oninput=saveSettings);$('#saveStyle').onclick=()=>{saveSettings();localStorage.setItem('photopan-style-preset',localStorage.getItem(SETTINGS));alert('현재 보드와 텍스트 스타일을 저장했습니다.')};
+board.onclick=()=>{selected=null;render()};
+(async()=>{await openDB();restoreSettings();photos=await dbAll();render();if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js').then(r=>r.update()).catch(()=>{})})();
